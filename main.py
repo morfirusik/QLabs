@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             with connect() as conn:
                 self.respond(200, state(conn))
             return
-        files = {"/": "index.html", "/app.js": "app.js", "/styles.css": "styles.css"}
+        files = {"/": "index.html", "/app.js": "app.js", "/simple.css": "simple.css"}
         if path not in files:
             self.send_error(404)
             return

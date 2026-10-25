@@ -2,7 +2,7 @@ let data = { chats: [] };
 let selected = null;
 const staticMode = location.hostname.endsWith('github.io') || location.protocol === 'file:' || new URLSearchParams(location.search).has('static');
 const $ = id => document.getElementById(id);
-const riskLabel = { low: 'НИЗКИЙ', medium: 'СРЕДНИЙ', high: 'ВЫСОКИЙ' };
+const riskLabel = { low: 'ПОКА СПОКОЙНО', medium: 'ЕСТЬ ПОДОЗРЕНИЕ', high: 'ПОХОЖЕ НА ОБМАН' };
 const statusLabel = { new: 'Ожидает проверки', sent: 'Передано в антифрод (демо)', operator: 'Передано оператору (демо)', false_positive: 'Отмечено как ложное срабатывание' };
 const reqLabel = { card: 'Карта', phone: 'Kaspi / телефон', url: 'Ссылка' };
 
@@ -68,9 +68,17 @@ function staticApa(messages) {
 function staticSave(chats) { localStorage.setItem('qlabs-chats', JSON.stringify(chats)); return { chats, rule_names: {} }; }
 function staticRead() {
   const saved = JSON.parse(localStorage.getItem('qlabs-chats') || 'null');
-  if (saved) return { chats: saved };
+  if (saved) {
+    if (!localStorage.getItem('qlabs-simple-start')) {
+      localStorage.setItem('qlabs-simple-start', '1');
+      if (!saved.some(chat => chat.messages.length === 0)) saved.unshift({ id: Date.now(), title: 'Новый разговор', track: 'compensation', track_name: 'Компенсации', status: 'new', messages: [], analysis: staticAnalyze([]) });
+      return staticSave(saved);
+    }
+    return { chats: saved };
+  }
   const messages = [{ id: 1, role: 'scammer', text: 'Пассивный доход: вложите 5000 ₸ и получите 10000 через неделю. Переводите на карту 4111 1111 1111 1111. Пригласи двух друзей!' }, { id: 2, role: 'apa', text: 'Ой интересно, а как это работает? Внук мне поможет' }];
-  return staticSave([{ id: 1, title: 'Инвестиционный клуб', track: 'pyramid', track_name: 'Пирамиды', status: 'new', messages, analysis: staticAnalyze(messages) }]);
+  localStorage.setItem('qlabs-simple-start', '1');
+  return staticSave([{ id: Date.now(), title: 'Новый разговор', track: 'compensation', track_name: 'Компенсации', status: 'new', messages: [], analysis: staticAnalyze([]) }, { id: 1, title: 'Инвестиционный клуб', track: 'pyramid', track_name: 'Пирамиды', status: 'new', messages, analysis: staticAnalyze(messages) }]);
 }
 function staticApi(path, body) {
   const state = staticRead(); const chats = state.chats;
@@ -107,7 +115,10 @@ function render() {
   $('track-pill').textContent = chat?.track_name || 'Симуляция';
   const messages = $('messages'); messages.replaceChildren();
   if (!chat?.messages.length) {
-    const starter = el('div', 'starter'); starter.append(el('div', 'starter-icon', '✦'), el('div', '', 'Напишите Сауле-апа от лица мошенника. Например: «Вам положена выплата от ЕНПФ, но сначала оплатите страховку».'));
+    const starter = el('div', 'starter'); starter.append(el('div', 'starter-icon', '💬'), el('div', '', 'Напишите Сауле-апа первое сообщение. Она вам ответит.'));
+    const example = el('button', 'example-button', 'Подставить пример сообщения');
+    example.onclick = () => { $('message-input').value = 'Вам положена выплата от ЕНПФ, но сначала оплатите страховку. Только сегодня!'; $('message-input').focus(); };
+    starter.append(example);
     messages.append(starter);
   } else chat.messages.forEach(m => {
     const row = el('div', 'msg ' + m.role);
@@ -117,6 +128,7 @@ function render() {
   messages.scrollTop = messages.scrollHeight;
   const a = chat?.analysis || { risk: 'low', score: 0, signals: [], requisites: [] };
   $('risk-badge').className = 'risk ' + a.risk; $('risk-badge').textContent = riskLabel[a.risk];
+  $('result-explain').textContent = !chat?.messages.length ? 'Напишите сообщение, чтобы начать проверку.' : a.risk === 'high' ? 'В переписке есть признаки обмана. Решение должен принять человек.' : a.risk === 'medium' ? 'Есть подозрительные слова. Посмотрите переписку внимательнее.' : 'Пока явных признаков обмана не найдено.';
   $('score').textContent = a.score + ' баллов'; $('score-fill').style.width = Math.min(100, a.score / 9 * 100) + '%';
   $('signal-count').textContent = a.signals.length; $('requisite-count').textContent = a.requisites.length;
   const signals = $('signals'); signals.replaceChildren(); signals.className = 'item-list' + (a.signals.length ? '' : ' empty');
