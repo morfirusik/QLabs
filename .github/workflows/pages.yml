@@ -1,7 +1,7 @@
 name: Publish QLabs demo
 on:
   push:
-    branches: [main]
+    branches: [gh-pages]
   workflow_dispatch:
 permissions:
   contents: read
