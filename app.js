@@ -1,5 +1,6 @@
 let data = { chats: [] };
 let selected = null;
+const staticMode = location.hostname.endsWith('github.io') || location.protocol === 'file:';
 const $ = id => document.getElementById(id);
 const riskLabel = { low: 'НИЗКИЙ', medium: 'СРЕДНИЙ', high: 'ВЫСОКИЙ' };
 const statusLabel = { new: 'Ожидает проверки', sent: 'Передано в антифрод (демо)', operator: 'Передано оператору (демо)', false_positive: 'Отмечено как ложное срабатывание' };
@@ -19,10 +20,56 @@ function toast(message) {
 }
 
 async function api(path, body) {
+  if (staticMode) return staticApi(path, body);
   const response = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Ошибка запроса');
   return result;
+}
+
+const staticTracks = { compensation: 'Компенсации', lottery: 'Розыгрыши', casino: 'Казино', pyramid: 'Пирамиды' };
+function staticAnalyze(messages) {
+  const text = messages.filter(m => m.role === 'scammer').map(m => m.text).join('\n');
+  const signals = [];
+  const rules = [
+    ['advance', 3, /оплат|страхов|комис|взнос|перевед/i, 'Предоплата за выплату или приз'],
+    ['secret', 3, /cvv|cvc|код из смс|смс.код|пин/i, 'Запрос секретных данных'],
+    ['profit', 2, /доход|прибыл|заработ|выигр|удво|процент/i, 'Обещание дохода или выигрыша'],
+    ['impersonation', 2, /енпф|нацбанк|полици|банк/i, 'Представляется организацией'],
+    ['urgency', 1, /срочн|только сегодня|последн|прямо сейчас/i, 'Давление и срочность'],
+    ['referral', 1, /пригласи|приведи|реферал/i, 'Приглашение новых участников']
+  ];
+  rules.forEach(([key, points, regex, label]) => { const match = text.match(regex); if (match) signals.push({ key, points, label, quote: match[0] }); });
+  const cards = text.match(/(?:\d[ -]?){15,18}\d/g) || [];
+  const phones = text.match(/(?:\+7|8)[\s()\-]*\d{3}[\s()\-]*\d{3}[\s()\-]*\d{2}[\s()\-]*\d{2}/g) || [];
+  const requisites = [...new Set(cards.map(v => ({ type: 'card', value: v.replace(/\D/g, ''), valid_luhn: true })).concat(phones.map(v => ({ type: 'phone', value: v.replace(/\s|[()\-]/g, '') }))))];
+  if (requisites.length && /перев|оплат|карт|kaspi|номер/i.test(text)) signals.push({ key: 'private_payment', points: 3, label: 'Реквизиты для перевода', quote: 'Реквизиты в контексте перевода' });
+  const score = signals.reduce((sum, s) => sum + s.points, 0);
+  return { score, risk: score >= 6 ? 'high' : score >= 3 ? 'medium' : 'low', signals, requisites };
+}
+function staticApa(messages) {
+  const text = messages.filter(m => m.role === 'scammer').map(m => m.text).join(' ');
+  if (/cvv|cvc|код из смс|смс.код|пин/i.test(text)) return 'Ой такие коды я не называю. Спасибо вам, до свидания';
+  if (!/деньг|выплат|оплат|перевод|карт|kaspi|компенсац|приз|доход|енпф|инвест|казино/i.test(text)) return 'Кажется вы ошиблись номером. Всего доброго';
+  if (staticAnalyze(messages).requisites.length) return 'Рахмет, записала. У меня Kaspi что то не проходит, можно другой номер или карту?';
+  return 'Да я хочу попробовать, айналайын. Куда мне перевести? Напишите номер карты или Kaspi покрупнее';
+}
+function staticSave(chats) { localStorage.setItem('qlabs-chats', JSON.stringify(chats)); return { chats, rule_names: {} }; }
+function staticRead() {
+  const saved = JSON.parse(localStorage.getItem('qlabs-chats') || 'null');
+  if (saved) return { chats: saved };
+  const messages = [{ id: 1, role: 'scammer', text: 'Пассивный доход: вложите 5000 ₸ и получите 10000 через неделю. Переводите на карту 4111 1111 1111 1111. Пригласи двух друзей!' }, { id: 2, role: 'apa', text: 'Ой интересно, а как это работает? Внук мне поможет' }];
+  return staticSave([{ id: 1, title: 'Инвестиционный клуб', track: 'pyramid', track_name: 'Пирамиды', status: 'new', messages, analysis: staticAnalyze(messages) }]);
+}
+function staticApi(path, body) {
+  const state = staticRead(); const chats = state.chats;
+  if (path === '/api/state') return Promise.resolve(state);
+  if (path === '/api/chats') { const id = Date.now(); const chat = { id, title: body.title || staticTracks[body.track], track: body.track, track_name: staticTracks[body.track], status: 'new', messages: [], analysis: staticAnalyze([]) }; chats.unshift(chat); return Promise.resolve(staticSave(chats)); }
+  const match = path.match(/\/api\/chats\/(\d+)\/(messages|status)/); if (!match) return Promise.reject(new Error('Не найдено'));
+  const chat = chats.find(c => c.id === Number(match[1]));
+  if (match[2] === 'status') chat.status = body.status;
+  else { chat.messages.push({ id: Date.now(), role: 'scammer', text: body.text || '[Изображение добавлено]' }); chat.messages.push({ id: Date.now() + 1, role: 'apa', text: staticApa(chat.messages) }); }
+  chat.analysis = staticAnalyze(chat.messages); return Promise.resolve(staticSave(chats));
 }
 
 function setData(next, id) {
